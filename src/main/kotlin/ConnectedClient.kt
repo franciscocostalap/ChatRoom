@@ -1,0 +1,150 @@
+import kotlinx.coroutines.*
+import mu.KotlinLogging
+import java.nio.channels.AsynchronousSocketChannel
+
+
+data class ConnectedClient(val name: String, private val channel: AsynchronousSocketChannel, private val rooms: RoomSet) {
+
+
+    val logger = KotlinLogging.logger {}
+
+    private val controlMessageQueue = MessageQueue<ControlMessage>()
+
+    var currentRoom: Room? = null
+    private var exiting: Boolean = false
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var mainJob: Job? = null
+
+    init {
+        mainJob = scope.launch {
+            mainLoop()
+        }
+    }
+
+    fun postRoomMessage(message: String, sender: Room) {
+        controlMessageQueue.put(RoomMessage(message, sender))
+    }
+
+    fun exit(){
+        controlMessageQueue.put(Stop)
+    }
+
+    suspend fun join() {
+        mainJob?.join()
+    }
+
+    private suspend fun mainLoop() {
+        writeToRemote("Welcome to the chat server, $name")
+        scope.launch {
+            remoteReadLoop()
+        }
+        while (!exiting) {
+            try {
+                when (val controlMessage = controlMessageQueue.take(5000)) {
+                    is RoomMessage -> writeToRemote(controlMessage.message)
+                    is RemoteLine -> executeCommand(controlMessage.message)
+                    is RemoteInputEnded -> clientExit()
+                    is Stop -> serverExit()
+                }
+            } catch (e: TimeoutCancellationException){
+                logger.info { "Timeout was reached on trying to get a message, ignored." }
+            } catch (e: Exception){
+                logger.error { "Unexpected exception while handling message: ${e.message}, ending connection" }
+                exiting = true
+            }
+        }
+    }
+
+    private suspend fun serverExit() {
+        currentRoom?.leave(this);
+        exiting = true;
+        writeErrorToRemote("Server is exiting");
+    }
+
+    private suspend fun executeCommand(message: String) {
+        when (val line = Line.parse(message)) {
+            is Line.InvalidLine -> writeErrorToRemote(line.reason)
+            is Line.Message -> postMessageToRoom(line.value)
+            is Line.EnterRoomCommand -> enterRoom(line.roomName)
+            is Line.LeaveRoomCommand -> leaveRoom()
+            is Line.ExitCommand -> clientExit()
+        }
+    }
+
+    private suspend fun clientExit() {
+        currentRoom?.leave(this)
+
+        exiting = true
+        writeOkToRemote()
+    }
+
+    private suspend fun leaveRoom() {
+        if(currentRoom == null){
+            writeErrorToRemote("You are not in a room.")
+
+        }else{
+            currentRoom!!.leave(this)
+            currentRoom = null
+            writeOkToRemote()
+        }
+
+    }
+
+    private suspend fun enterRoom(roomName: String) {
+        currentRoom?.leave(this)
+        currentRoom = rooms.getOrCreateRoom(roomName)
+        currentRoom?.enter(this)
+        writeOkToRemote()
+    }
+
+    private suspend fun postMessageToRoom(message: String) {
+        if(currentRoom == null){
+            writeErrorToRemote("Need to be inside a room to post messages")
+        }else{
+            currentRoom?.post(this, message)
+        }
+    }
+
+    private suspend fun remoteReadLoop(){
+        try{
+            while(!exiting){
+                val line = channel.readLine() ?: break
+                logger.info { "Received line: $line" }
+                controlMessageQueue.put(RemoteLine(line))
+            }
+        }catch (e: Exception){
+            logger.error { "Unexpected exception while reading from remote: ${e.message}" }
+        }finally {
+            if(!exiting){
+                controlMessageQueue.put(RemoteInputEnded)
+            }
+        }
+        logger.info { "Exiting readLoop" }
+    }
+
+    private suspend fun writeToRemote(line: String){
+        channel.writeLine(line)
+    }
+
+    private suspend fun writeErrorToRemote(line: String) = writeToRemote("[Error: $line]")
+    private suspend fun  writeOkToRemote() = writeToRemote("[OK]");
+
+
+
+    private sealed class ControlMessage()
+
+    // A message sent by to a room
+    private data class RoomMessage(val message: String, val sender: Room): ControlMessage()
+
+    // A line sent by the remote client.
+    private data class RemoteLine(val message: String): ControlMessage()
+
+    // The information that the remote client stream has ended, probably because the
+    // socket was closed.
+    private object RemoteInputEnded: ControlMessage()
+
+    // An instruction to stop handling this remote client
+    private object Stop: ControlMessage()
+
+}
