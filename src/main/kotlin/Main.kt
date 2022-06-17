@@ -8,13 +8,6 @@ fun main() {
     val server = ChatRoomServer(logger, InetAddress.getByName("localhost"), 8080)
 
     server.run()
-
-    while (true) {
-        print("> ")
-        val cmd = readln()
-        if (cmd == "exit") {
-            break
-        }
-    }
+    server.join()
 
 }

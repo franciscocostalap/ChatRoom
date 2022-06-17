@@ -51,7 +51,7 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
                     is Stop -> serverExit()
                 }
             } catch (e: TimeoutCancellationException){
-                logger.info { "Timeout was reached on trying to get a message, ignored." }
+                logger.info { "Timeout for $name was reached on trying to get a message, ignored." }
             } catch (e: Exception){
                 logger.error { "Unexpected exception while handling message: ${e.message}, ending connection" }
                 exiting = true
@@ -117,8 +117,10 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
             while(!exiting){
 
                 val line = channel.readLine() ?: break
-                logger.info { "Received line: $line" }
-                controlMessageQueue.put(RemoteLine(line))
+                if(line.isNotBlank()){
+                    logger.info { "[${currentRoom?.name ?: "Lobby"}] Received line from $name: $line" }
+                    controlMessageQueue.put(RemoteLine(line))
+                }
             }
         }catch (e: Exception){
             logger.error { "Unexpected exception while reading from remote: ${e.message}" }

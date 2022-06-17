@@ -7,6 +7,8 @@ import java.nio.channels.AsynchronousServerSocketChannel
 import java.nio.channels.AsynchronousSocketChannel
 import java.util.LinkedList
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
@@ -17,7 +19,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
     private val inetSocketAddress = InetSocketAddress(address, port)
 
-    val mutex = ReentrantLock()
+    private val mutex = ReentrantLock()
 
     /**
      * Server possible states
@@ -29,7 +31,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
     /**
      * Server current state.
      */
-    private var serverState = AtomicReference(State.OFFLINE)
+    private val serverState = AtomicReference(State.OFFLINE)
 
     /**
      * Server channel group.
@@ -41,6 +43,11 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
      */
     private val serverChannel = AsynchronousServerSocketChannel.open(channelGroup)
 
+    private val clients = LinkedList<ConnectedClient>()
+
+    @Volatile
+    private var acceptJob: Job? = null
+
     /**
      * Parent coroutine scope.
      * Used to launch coroutines.
@@ -51,7 +58,8 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
     private val nextClientID = AtomicInteger(0)
 
-    var acceptJob: Job? = null
+    private val startedShutdown = AtomicBoolean(false)
+
 
     /**
      * Starts the server and begins listening for connections.
@@ -111,17 +119,16 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
     }
 
-    fun join(){
-        if (serverState.get() == State.OFFLINE)
-        {
-            logger.error{ "Server has not started" }
-            throw Exception("Server has not started");
+    fun join() {
+        if (serverState.get() == State.OFFLINE || serverState.get() == State.ENDED) {
+            logger.error { "Server is not running " }
+            throw Exception("Server is not running")
         }
 
         while (serverState.get() == State.STARTING || acceptJob == null) Thread.yield()
 
         runBlocking {
-            acceptJob?.join()
+            if (acceptJob?.isActive == true) acceptJob?.join()
         }
     }
 
@@ -136,8 +143,8 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         }
 
         serverChannel.close()
-        channelGroup.shutdown()
-        serverState.set(State.OFFLINE)
+        channelGroup.shutdownNow()
+        serverState.set(State.ENDED)
     }
 
 
@@ -147,8 +154,28 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
      * @param timeout The timeout in seconds
      * If the timeout is exceeded the application ends abruptly.
      */
-    fun shutdown(timeout: Int) {
-        TODO("Not yet implemented")
+    fun shutdown(timeout: Long) {
+        fun notifyShutdown() {
+            clients.forEach {
+
+            }
+        }
+
+        if (!serverState.compareAndSet(State.ONLINE, State.ENDING)) {
+            logger.info { "Could not shutdown server" }
+            throw IllegalStateException("Server is not online")
+        }
+        logger.info("Shutdown started")
+
+        serverChannel.close()
+
+        notifyShutdown()
+
+        channelGroup.shutdown()
+        if (!channelGroup.awaitTermination(timeout, TimeUnit.SECONDS)) {
+            channelGroup.shutdownNow()
+        }
+        serverState.set(State.ENDED)
     }
 
 }
