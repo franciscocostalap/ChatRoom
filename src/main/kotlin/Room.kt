@@ -24,6 +24,7 @@ class Room(val name : String){
         }
     }
 
+
     /**
      * Sends a message to all clients in the room
      */

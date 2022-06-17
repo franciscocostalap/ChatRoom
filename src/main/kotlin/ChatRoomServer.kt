@@ -37,7 +37,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
     private val channelGroup = AsynchronousChannelGroup.withThreadPool(Executors.newSingleThreadExecutor())
 
     /**
-     * Server Asynchronous Socker Channel
+     * Server Asynchronous Socket Channel
      */
     private val serverChannel = AsynchronousServerSocketChannel.open(channelGroup)
 
@@ -71,6 +71,13 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         }
 
         logger.info { "Server Started" }
+    }
+
+
+    fun removeFromList(elem: ConnectedClient) {
+        mutex.withLock {
+            clients.remove(elem)
+        }
     }
 
     private suspend fun runInternal() {
@@ -125,7 +132,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
     fun stop() {
         if (!serverState.compareAndSet(State.ONLINE, State.ENDING)) {
             logger.info { "Could not stop server" }
-            throw IllegalStateException("Server is not running")
+            throw IllegalStateException("Server is not online")
         }
 
         serverChannel.close()
@@ -133,9 +140,11 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         serverState.set(State.OFFLINE)
     }
 
+
     /**
      * Starts the shutdown process, does not let more clients join.
      *
+     * @param timeout The timeout in seconds
      * If the timeout is exceeded the application ends abruptly.
      */
     fun shutdown(timeout: Int) {

@@ -4,7 +4,7 @@ import sync.MessageQueue
 import java.nio.channels.AsynchronousSocketChannel
 
 
-data class ConnectedClient(val name: String, private val channel: AsynchronousSocketChannel, private val rooms: RoomSet) {
+data class ConnectedClient(val name: String, private val channel: AsynchronousSocketChannel, private val rooms: RoomSet, private val exitFunction : (ConnectedClient) -> Unit) {
 
 
     val logger = KotlinLogging.logger {}
@@ -60,9 +60,11 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
     }
 
     private suspend fun serverExit() {
-        currentRoom?.leave(this);
-        exiting = true;
-        writeErrorToRemote("Server is exiting");
+        currentRoom?.leave(this)
+        exitFunction(this)
+
+        exiting = true
+        writeErrorToRemote("Server is exiting")
     }
 
     private suspend fun executeCommand(message: String) {
@@ -77,6 +79,7 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
 
     private suspend fun clientExit() {
         currentRoom?.leave(this)
+        exitFunction(this)
 
         exiting = true
         writeOkToRemote()
