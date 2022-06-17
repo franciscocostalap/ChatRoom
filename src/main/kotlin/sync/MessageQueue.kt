@@ -1,3 +1,5 @@
+package sync
+
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine

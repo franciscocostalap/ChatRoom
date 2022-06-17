@@ -22,7 +22,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
     /**
      * Server possible states
      */
-    private enum class State{
+    private enum class State {
         OFFLINE, STARTING, ONLINE, ENDING, ENDED
     }
 
@@ -53,13 +53,12 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
     var acceptJob: Job? = null
 
-
     /**
      * Starts the server and begins listening for connections.
      */
     fun run() {
         logger.trace { "Run called." }
-        if(!serverState.compareAndSet(State.OFFLINE, State.STARTING)){
+        if (!serverState.compareAndSet(State.OFFLINE, State.STARTING)) {
             logger.info { "Could not start server" }
             throw IllegalStateException("Server is already running")
         }
@@ -67,37 +66,42 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         serverChannel.bind(inetSocketAddress)
         serverState.set(State.ONLINE)
         // Future property
-        acceptJob = scope.launch{
+        acceptJob = scope.launch {
             runInternal()
         }
 
         logger.info { "Server Started" }
     }
 
-    private suspend fun runInternal(){
+    private suspend fun runInternal() {
 
-        val clients = LinkedList<ConnectedClient>()
         logger.info { serverState.get() }
-        while(serverState.get() == State.ONLINE){
-            try{
-                val clientChannel = serverChannel.acceptSuspend()
-                val clientName = "client-${nextClientID.incrementAndGet()}"
-                logger.info { "New client connected: $clientName" }
-                val client = ConnectedClient(clientName, clientChannel, rooms)
-                mutex.withLock { clients.add(client) }
-            }catch (e: Exception){
-                logger.warn{ "Exception caught '{}', which may happen when the listener is closed, continuing..."}
+        while (serverState.get() == State.ONLINE) {
+            try {
+
+                if (!startedShutdown.get()) {
+                    val clientChannel = serverChannel.acceptSuspend()
+
+                    val clientName = "client-${nextClientID.incrementAndGet()}"
+                    logger.info { "New client connected: $clientName" }
+                    val client = ConnectedClient(clientName, clientChannel, rooms, ::removeFromList)
+                    mutex.withLock { clients.add(client) }
+                }
+
+            } catch (e: Exception) {
+                logger.warn { "Exception caught '{}', which may happen when the listener is closed, continuing..." }
                 // continuing...
             }
-            logger.info{"Waiting for clients to end, before ending accept loop"}
+            logger.info { "Waiting for clients to end, before ending accept loop" }
         }
 
         clients.forEach { client ->
             client.exit()
             client.join()
         }
-        logger.info{"Accept thread ending"}
+        logger.info { "Accept thread ending" }
         serverState.set(State.ENDED)
+
     }
 
     fun join(){
@@ -107,12 +111,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
             throw Exception("Server has not started");
         }
 
-        // FIXME what if it is starting?
-        if (acceptJob == null)
-        {
-            logger.error{ "Unexpected state: acceptThread is not set" }
-            throw Exception("Unexpected state");
-        }
+        while (serverState.get() == State.STARTING || acceptJob == null) Thread.yield()
 
         runBlocking {
             acceptJob?.join()
@@ -124,7 +123,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
      * Exits the application abruptly
      */
     fun stop() {
-        if(!serverState.compareAndSet(State.ONLINE, State.ENDING)){
+        if (!serverState.compareAndSet(State.ONLINE, State.ENDING)) {
             logger.info { "Could not stop server" }
             throw IllegalStateException("Server is not running")
         }

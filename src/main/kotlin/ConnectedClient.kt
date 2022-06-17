@@ -1,5 +1,6 @@
 import kotlinx.coroutines.*
 import mu.KotlinLogging
+import sync.MessageQueue
 import java.nio.channels.AsynchronousSocketChannel
 
 
@@ -11,6 +12,8 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
     private val controlMessageQueue = MessageQueue<ControlMessage>()
 
     var currentRoom: Room? = null
+
+    @Volatile
     private var exiting: Boolean = false
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -109,6 +112,7 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
     private suspend fun remoteReadLoop(){
         try{
             while(!exiting){
+
                 val line = channel.readLine() ?: break
                 logger.info { "Received line: $line" }
                 controlMessageQueue.put(RemoteLine(line))
@@ -123,7 +127,7 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
         logger.info { "Exiting readLoop" }
     }
 
-    private suspend fun writeToRemote(line: String){
+    suspend fun writeToRemote(line: String){
         channel.writeLine(line)
     }
 
