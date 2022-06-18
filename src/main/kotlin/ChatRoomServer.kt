@@ -4,22 +4,15 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.channels.AsynchronousChannelGroup
 import java.nio.channels.AsynchronousServerSocketChannel
-import java.nio.channels.AsynchronousSocketChannel
-import java.util.LinkedList
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.concurrent.withLock
 
 class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: Int) {
 
 
     private val inetSocketAddress = InetSocketAddress(address, port)
-
-    private val mutex = ReentrantLock()
 
     /**
      * Server possible states
@@ -43,7 +36,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
      */
     private val serverChannel = AsynchronousServerSocketChannel.open(channelGroup)
 
-    private val clients = LinkedList<ConnectedClient>()
+    private val clients = ConcurrentLinkedQueue<ConnectedClient>()
 
     @Volatile
     private var acceptJob: Job? = null
@@ -58,7 +51,6 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
     private val nextClientID = AtomicInteger(0)
 
-    private val startedShutdown = AtomicBoolean(false)
 
 
     /**
@@ -82,27 +74,38 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
     }
 
 
-    fun removeFromList(elem: ConnectedClient) {
-        mutex.withLock {
-            clients.remove(elem)
-        }
-    }
-
     private suspend fun runInternal() {
 
         logger.info { serverState.get() }
         while (serverState.get() == State.ONLINE) {
             try {
 
-                if (!startedShutdown.get()) {
-                    val clientChannel = serverChannel.acceptSuspend()
+                val clientChannel = serverChannel.acceptSuspend()
+
+                if (serverState.get() != State.ENDING) {
 
                     val clientName = "client-${nextClientID.incrementAndGet()}"
                     logger.info { "New client connected: $clientName" }
-                    val client = ConnectedClient(clientName, clientChannel, rooms, ::removeFromList)
-                    mutex.withLock { clients.add(client) }
+                    val client = ConnectedClient(clientName, clientChannel, rooms) {
+                        clients.remove(it)
+                    }
+
+                    clients.add(client)
                 }
 
+            } catch (e: CancellationException) {
+                withContext(NonCancellable) {
+
+                    if (serverState.get() == State.ENDING) {
+                        logger.info { "Server ended" }
+                        clients.forEach { client ->
+                            client.writeToRemote("Server is shutting down... .Please exit!")
+                        }
+                        clients.forEach { client ->
+                            client.join()
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 logger.warn { "Exception caught '{}', which may happen when the listener is closed, continuing..." }
                 // continuing...
@@ -110,13 +113,9 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
             logger.info { "Waiting for clients to end, before ending accept loop" }
         }
 
-        clients.forEach { client ->
-            client.exit()
-            client.join()
-        }
-        logger.info { "Accept thread ending" }
-        serverState.set(State.ENDED)
 
+        //logger.info { "Accept thread ending" }
+        //serverState.set(State.ENDED)
     }
 
     fun join() {
@@ -137,14 +136,13 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
      * Exits the application abruptly
      */
     fun stop() {
-        if (!serverState.compareAndSet(State.ONLINE, State.ENDING)) {
+        if (!serverState.compareAndSet(State.ONLINE, State.ENDED)) {
             logger.info { "Could not stop server" }
             throw IllegalStateException("Server is not online")
         }
 
         serverChannel.close()
         channelGroup.shutdownNow()
-        serverState.set(State.ENDED)
     }
 
 
@@ -155,11 +153,6 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
      * If the timeout is exceeded the application ends abruptly.
      */
     fun shutdown(timeout: Long) {
-        fun notifyShutdown() {
-            clients.forEach {
-
-            }
-        }
 
         if (!serverState.compareAndSet(State.ONLINE, State.ENDING)) {
             logger.info { "Could not shutdown server" }
@@ -167,14 +160,22 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         }
         logger.info("Shutdown started")
 
-        serverChannel.close()
 
-        notifyShutdown()
 
-        channelGroup.shutdown()
-        if (!channelGroup.awaitTermination(timeout, TimeUnit.SECONDS)) {
-            channelGroup.shutdownNow()
+        runBlocking {
+            try {
+                withTimeout(timeout * 1000) {
+                    acceptJob?.cancelAndJoin()
+                    // acceptJob?.join()
+                }
+            } catch (e: TimeoutCancellationException) {
+                serverChannel.close()
+                channelGroup.shutdownNow()
+            }
         }
+
+        serverChannel.close()
+        channelGroup.shutdown()
         serverState.set(State.ENDED)
     }
 
