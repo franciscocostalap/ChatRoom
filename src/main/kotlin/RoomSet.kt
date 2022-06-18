@@ -7,7 +7,6 @@ import kotlin.concurrent.withLock
 class RoomSet {
 
     /*
-     * TODO
      * Manages a set of rooms, namely the creation and retrieval.
      * Must be thread-safe.
      */

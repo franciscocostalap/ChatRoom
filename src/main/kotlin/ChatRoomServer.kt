@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration
 
-class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: Int) {
+class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: Int) : PCServer {
 
 
     companion object {
@@ -63,8 +63,9 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
     /**
      * Starts the server and begins listening for connections.
+     *
      */
-    fun run() {
+    override fun run() {
         logger.trace { "Run called." }
         if (!serverState.compareAndSet(State.OFFLINE, State.STARTING)) {
             logger.info { "Could not start server" }
