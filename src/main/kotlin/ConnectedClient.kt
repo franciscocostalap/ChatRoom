@@ -14,7 +14,7 @@ data class ConnectedClient(
 ) {
 
 
-    val logger = KotlinLogging.logger(this.toString())
+    private val logger = KotlinLogging.logger(this.toString())
 
     private val controlMessageQueue = MessageQueue<ControlMessage>()
 
@@ -27,8 +27,8 @@ data class ConnectedClient(
     @Volatile
     private var exiting: Boolean = false
 
-    val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    var mainJob: Job? = null
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var mainJob: Job? = null
 
     init {
         mainJob = scope.launch {

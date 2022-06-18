@@ -122,9 +122,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
             logger.info { "Waiting for clients to end, before ending accept loop" }
         }
 
-
-        //logger.info { "Accept thread ending" }
-        //serverState.set(State.ENDED)
+        serverChannel.close()
     }
 
     override fun join() {
