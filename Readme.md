@@ -71,19 +71,13 @@ fun shutdown(timeout: Duration) {
 
 When the shutdown process is called, it begins by checking if the server state is **Online** and if it is, the server
 state
-is set to **Ending**. If the server is not **Online** there's no point in starting the shutdown, an **
-IllegalStateException** is thrown.
+is set to **Ending**. If the server is not **Online** there's no point in starting the shutdown, an **IllegalStateException** is thrown.
 
-The start of this process implies to stop accepting new clients and wait for the termination of the existing ones while
-the duration
-of the timeout does not end. For that purpose the job associated to the cycle of acceptance is cancelled and suspends
-the coroutine until the cancellation is complete.
+The start of this process implies to stop accepting new clients and wait for the termination of the existing ones or for the timeout to pass. For that purpose the job associated to the cycle of acceptance is cancelled and suspends the coroutine until the cancellation is complete.
 
 Therefore, when an **CancellationException** is thrown, is known that the shutdown has started so a warning is sent to
-all the clients
-informing them about it and before finishing the cancellation process with success, it waits for all the jobs associated
-to the clients that are
-already connected to the server to terminate.
+all the clients informing them about it. Before finishing the cancellation process with success, it waits for all the jobs associated
+to the clients that are already connected to the server to terminate.
 
 Finally, it shutdowns and sets the server state to **Ended**. On the other hand,
 if it times out, ends the application abruptly and forces the clients to exit.
