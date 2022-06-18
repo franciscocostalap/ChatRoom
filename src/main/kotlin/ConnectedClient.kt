@@ -4,10 +4,15 @@ import sync.MessageQueue
 import java.nio.channels.AsynchronousSocketChannel
 
 
-data class ConnectedClient(val name: String, private val channel: AsynchronousSocketChannel, private val rooms: RoomSet, private val exitFunction : (ConnectedClient) -> Unit) {
+data class ConnectedClient(
+    val name: String,
+    private val channel: AsynchronousSocketChannel,
+    private val rooms: RoomSet,
+    private val onExit: (ConnectedClient) -> Unit
+) {
 
 
-    val logger = KotlinLogging.logger {}
+    val logger = KotlinLogging.logger(this.toString())
 
     private val controlMessageQueue = MessageQueue<ControlMessage>()
 
@@ -16,8 +21,8 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
     @Volatile
     private var exiting: Boolean = false
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var mainJob: Job? = null
+    val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    var mainJob: Job? = null
 
     init {
         mainJob = scope.launch {
@@ -57,12 +62,12 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
                 exiting = true
             }
         }
+        logger.info { "Exiting main loop" }
     }
 
     private suspend fun serverExit() {
         currentRoom?.leave(this)
-        exitFunction(this)
-
+        onExit(this)
         exiting = true
         writeErrorToRemote("Server is exiting")
     }
@@ -79,10 +84,15 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
 
     private suspend fun clientExit() {
         currentRoom?.leave(this)
-        exitFunction(this)
+        // onExit(this)
 
         exiting = true
         writeOkToRemote()
+
+        channel.close()
+        scope.cancel()
+
+
     }
 
     private suspend fun leaveRoom() {
@@ -129,6 +139,7 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
                 controlMessageQueue.put(RemoteInputEnded)
             }
         }
+
         logger.info { "Exiting readLoop" }
     }
 
@@ -137,23 +148,25 @@ data class ConnectedClient(val name: String, private val channel: AsynchronousSo
     }
 
     private suspend fun writeErrorToRemote(line: String) = writeToRemote("[Error: $line]")
-    private suspend fun  writeOkToRemote() = writeToRemote("[OK]");
+    private suspend fun writeOkToRemote() = writeToRemote("[OK]")
 
 
 
     private sealed class ControlMessage()
 
     // A message sent by to a room
-    private data class RoomMessage(val message: String, val sender: Room): ControlMessage()
+    private data class RoomMessage(val message: String, val sender: Room) : ControlMessage()
 
     // A line sent by the remote client.
-    private data class RemoteLine(val message: String): ControlMessage()
+    private data class RemoteLine(val message: String) : ControlMessage()
 
     // The information that the remote client stream has ended, probably because the
     // socket was closed.
-    private object RemoteInputEnded: ControlMessage()
+    private object RemoteInputEnded : ControlMessage()
 
     // An instruction to stop handling this remote client
-    private object Stop: ControlMessage()
+    private object Stop : ControlMessage()
+
+    override fun toString() = name
 
 }
