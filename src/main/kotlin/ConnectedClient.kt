@@ -1,5 +1,7 @@
 import kotlinx.coroutines.*
 import mu.KotlinLogging
+import nioCoroutines.readLine
+import nioCoroutines.writeLine
 import sync.MessageQueue
 import java.nio.channels.AsynchronousSocketChannel
 
@@ -15,6 +17,10 @@ data class ConnectedClient(
     val logger = KotlinLogging.logger(this.toString())
 
     private val controlMessageQueue = MessageQueue<ControlMessage>()
+
+    companion object {
+        private const val TAKE_MESSAGE_TIMEOUT = 20_000L // 20 seconds
+    }
 
     var currentRoom: Room? = null
 
@@ -49,7 +55,7 @@ data class ConnectedClient(
         }
         while (!exiting) {
             try {
-                when (val controlMessage = controlMessageQueue.take(5000)) {
+                when (val controlMessage = controlMessageQueue.take(TAKE_MESSAGE_TIMEOUT)) {
                     is RoomMessage -> writeToRemote(controlMessage.message)
                     is RemoteLine -> executeCommand(controlMessage.message)
                     is RemoteInputEnded -> clientExit()
@@ -73,12 +79,13 @@ data class ConnectedClient(
     }
 
     private suspend fun executeCommand(message: String) {
-        when (val line = Line.parse(message)) {
+        when (val line = Line.parseClient(message)) {
             is Line.InvalidLine -> writeErrorToRemote(line.reason)
             is Line.Message -> postMessageToRoom(line.value)
             is Line.EnterRoomCommand -> enterRoom(line.roomName)
             is Line.LeaveRoomCommand -> leaveRoom()
             is Line.ExitCommand -> clientExit()
+            else -> error("Not expected here")
         }
     }
 

@@ -1,18 +1,14 @@
+package nioCoroutines
+
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.nio.ByteBuffer
-import java.nio.CharBuffer
 import java.nio.channels.AsynchronousServerSocketChannel
 import java.nio.channels.AsynchronousSocketChannel
 import java.nio.channels.CompletionHandler
-import java.nio.channels.InterruptedByTimeoutException
-import java.nio.charset.Charset
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
 
-private val encoder = Charsets.UTF_8.newEncoder()
 private val decoder = Charsets.UTF_8.newDecoder()
 
 /**
@@ -100,6 +96,11 @@ suspend fun AsynchronousSocketChannel.writeLine(line: String){
     writeFrom(buffer)
     buffer.clear()
 }
+
+
+
+
+
 
 
 

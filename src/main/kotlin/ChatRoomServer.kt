@@ -1,15 +1,24 @@
+
 import kotlinx.coroutines.*
 import mu.KLogger
+import nioCoroutines.acceptSuspend
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.channels.AsynchronousChannelGroup
 import java.nio.channels.AsynchronousServerSocketChannel
+import java.nio.channels.AsynchronousSocketChannel
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration
 
 class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: Int) {
+
+
+    companion object {
+        const val OK_MESSAGE_FORMAT = "[OK]"
+    }
 
 
     private val inetSocketAddress = InetSocketAddress(address, port)
@@ -52,7 +61,6 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
     private val nextClientID = AtomicInteger(0)
 
 
-
     /**
      * Starts the server and begins listening for connections.
      */
@@ -65,7 +73,6 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
 
         serverChannel.bind(inetSocketAddress)
         serverState.set(State.ONLINE)
-        // Future property
         acceptJob = scope.launch {
             runInternal()
         }
@@ -73,25 +80,27 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         logger.info { "Server Started" }
     }
 
+    private fun handleClientSession(clientChannel: AsynchronousSocketChannel) {
+        val clientName = "client-${nextClientID.incrementAndGet()}"
+        logger.info { "New client connected: $clientName" }
+        val client = ConnectedClient(clientName, clientChannel, rooms) {
+            clients.remove(it)
+        }
+        clients.add(client)
+    }
 
     private suspend fun runInternal() {
 
-        logger.info { serverState.get() }
         while (serverState.get() == State.ONLINE) {
             try {
-
                 val clientChannel = serverChannel.acceptSuspend()
 
-                if (serverState.get() != State.ENDING) {
-
-                    val clientName = "client-${nextClientID.incrementAndGet()}"
-                    logger.info { "New client connected: $clientName" }
-                    val client = ConnectedClient(clientName, clientChannel, rooms) {
-                        clients.remove(it)
-                    }
-
-                    clients.add(client)
-                }
+                /**
+                 * Avoids race between cancelling the accept suspending point at shutdown
+                 * and Accepting a connection
+                 */
+                if (serverState.get() != State.ENDING)
+                    handleClientSession(clientChannel)
 
             } catch (e: CancellationException) {
                 withContext(NonCancellable) {
@@ -99,7 +108,7 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
                     if (serverState.get() == State.ENDING) {
                         logger.info { "Server ended" }
                         clients.forEach { client ->
-                            client.writeToRemote("Server is shutting down... .Please exit!")
+                            client.writeToRemote("Server is shutting down... Please exit!")
                         }
                         clients.forEach { client ->
                             client.join()
@@ -118,10 +127,10 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         //serverState.set(State.ENDED)
     }
 
-    fun join() {
+    override fun join() {
         if (serverState.get() == State.OFFLINE || serverState.get() == State.ENDED) {
             logger.error { "Server is not running " }
-            throw Exception("Server is not running")
+            throw IllegalStateException("Server is not running")
         }
 
         while (serverState.get() == State.STARTING || acceptJob == null) Thread.yield()
@@ -131,52 +140,59 @@ class ChatRoomServer(private val logger: KLogger, address: InetAddress, port: In
         }
     }
 
-
     /**
      * Exits the application abruptly
      */
-    fun stop() {
-        if (!serverState.compareAndSet(State.ONLINE, State.ENDED)) {
-            logger.info { "Could not stop server" }
-            throw IllegalStateException("Server is not online")
-        }
+    override fun stop() {
+        if (serverState.get() == State.ENDING) {
+            if (!serverState.compareAndSet(State.ENDING, State.ENDED)) {
+                logger.info { "Could not stop server" }
+                throw IllegalStateException("Server is already ended.")
+            }
+        } else
+            if (!serverState.compareAndSet(State.ONLINE, State.ENDED)) {
+                logger.info { "Could not stop server" }
+                throw IllegalStateException("Server is not online")
+            }
 
-        serverChannel.close()
+        clients.forEach {
+            it.exit()
+        }
         channelGroup.shutdownNow()
     }
 
 
     /**
-     * Starts the shutdown process, does not let more clients join.
+     * Starts the shutdown process.
+     * This will stop accepting new connections.
+     * Waits for all the clients to exit for [timeout].
+     * If the timeout is exceeded the application ends abruptly closing all the connections.
      *
      * @param timeout The timeout in seconds
-     * If the timeout is exceeded the application ends abruptly.
      */
-    fun shutdown(timeout: Long) {
+    override fun shutdown(timeout: Duration) {
 
         if (!serverState.compareAndSet(State.ONLINE, State.ENDING)) {
             logger.info { "Could not shutdown server" }
             throw IllegalStateException("Server is not online")
         }
         logger.info("Shutdown started")
-
-
-
         runBlocking {
             try {
-                withTimeout(timeout * 1000) {
+                withTimeout(timeout.inWholeMilliseconds) {
                     acceptJob?.cancelAndJoin()
-                    // acceptJob?.join()
+                    channelGroup.shutdown()
+                    serverState.set(State.ENDED)
                 }
             } catch (e: TimeoutCancellationException) {
-                serverChannel.close()
-                channelGroup.shutdownNow()
+                if (serverChannel.isOpen) {
+                    stop()
+                    logger.info("Shutdown after timeout")
+                    return@runBlocking
+                }
             }
         }
 
-        serverChannel.close()
-        channelGroup.shutdown()
-        serverState.set(State.ENDED)
     }
 
 }

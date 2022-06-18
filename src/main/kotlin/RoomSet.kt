@@ -1,7 +1,9 @@
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
+/**
+ * Thread-safe roomSet implementation.
+ */
 class RoomSet {
 
     /*
@@ -14,18 +16,18 @@ class RoomSet {
 
     fun getOrCreateRoom(name: String) : Room{
         mutex.withLock {
-            if(rooms.containsKey(name)){
-                val room = rooms[name]
+            val filteredName = name.trim().removeSuffix(System.lineSeparator())
+            if (rooms.containsKey(filteredName)) {
+                val room = rooms[filteredName]
                 requireNotNull(room)
                 return room
             }
 
-            val room = Room(name);
-            rooms[name] = room
-            return room;
+            val room = Room(name)
+            rooms[filteredName] = room
+            return room
         }
     }
 
-    
 
 }
