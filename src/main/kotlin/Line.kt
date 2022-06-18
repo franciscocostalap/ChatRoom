@@ -11,8 +11,24 @@ sealed class Line private constructor(){
 
     companion object {
 
-        fun parse(line: String): Line{
-            if(!line.startsWith("/"))
+        fun parseServer(line: String): Line {
+
+            val parts = line.split(" ")
+            return when (parts[0]) {
+                "/shutdown" -> parseShutdown(parts)
+                "/exit" -> parseExit(parts)
+                else -> InvalidLine("Unknown command.")
+            }
+        }
+
+        private fun parseShutdown(parts: List<String>): Line =
+            if (parts.size != 2)
+                InvalidLine("/shutdown command requires exactly one argument")
+            else ShutdownCommand(parts[1].toLong())
+
+
+        fun parseClient(line: String): Line {
+            if (!line.startsWith("/"))
                 return Message(line)
 
             val parts = line.split(" ")
