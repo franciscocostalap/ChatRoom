@@ -22,7 +22,7 @@ The parsing of the remote client lines (commands or messages) and server side co
 
 Server Side Functionalities:
 
-- **/shutdown [timeout]** - Clients are not forced the clients to exit. Instead, the server will wait for the clients to
+- **/shutdown [timeout]** - Clients are not forced to exit. Instead, the server will wait for the clients to
   exit for [timeout] milliseconds.
   After the timeout, the server will exit abruptly.
 
