@@ -4,6 +4,8 @@ This base implementation uses the following design:
 
 ![App Diagram](AppDiagram.png)
 
+## Implementation details
+
 - Each server instance uses a coroutine to listen for new connections and creates a client instance for each.
 - Each client instance uses two coroutines that use the same client scope.
 
@@ -19,6 +21,10 @@ the main coroutine.
 Most interactions with the client are done by sending messages to the client control queue.
 
 The parsing of the remote client lines (commands or messages) and server side commands are done by the Line class.
+
+#### Nio Coroutines
+
+This project adds a simple api to use AsynchronousSocketChannels with coroutines.
 
 Server Side Functionalities:
 
