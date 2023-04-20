@@ -20,6 +20,8 @@ Most interactions with the client are done by sending messages to the client con
 
 The parsing of the remote client lines (commands or messages) and server side commands are done by the Line class.
 
+Uses JVM concurrency and kotlin coroutine mechanisms.
+
 Server Side Functionalities:
 
 - **/shutdown [timeout]** - Clients are not forced the clients to exit. Instead, the server will wait for the clients to
