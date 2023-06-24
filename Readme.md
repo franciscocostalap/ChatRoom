@@ -1,5 +1,7 @@
 # ChatRoom
 
+Objective: The chatRoom project is a TCP server written in Kotlin, focusing on Concurrency programming. Its primary objective is to create a server that facilitates the creation and usage of chat rooms. To achieve concurrent and parallel connections, the project employs coroutines to facade the NIO blocking operations. By leveraging the power of coroutines, the server can handle multiple connections simultaneously, enabling efficient and seamless communication within chat rooms.
+
 This base implementation uses the following design:
 
 ![App Diagram](AppDiagram.png)
